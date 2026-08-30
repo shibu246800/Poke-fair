@@ -2,6 +2,7 @@ import os
 import sqlite3
 import asyncio
 import threading
+import re
 from flask import Flask
 import discord
 from discord.ext import commands, tasks
@@ -59,12 +60,37 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
+    # Check if the message is from Pokétwo and in a watched channel
     if message.author.id == POKETWO_BOT_ID and message.channel.name in CHANNELS_TO_WATCH:
-        if "Congratulations" in message.content and "caught a" in message.content:
+        
+        text_to_check = message.content or ""
+        winner_member = None
+        guild = message.guild
+
+        # Look inside embeds (Pokétwo card boxes)
+        if message.embeds:
+            for embed in message.embeds:
+                if embed.description:
+                    text_to_check += " " + embed.description
+                if embed.title:
+                    text_to_check += " " + embed.title
+
+        # Check if this is a catch confirmation message
+        if "Congratulations" in text_to_check and "caught a" in text_to_check:
+            
+            # Method A: Try grabbing standard message mentions first (Grabbing the single first user)
             if message.mentions:
-                winner = message.mentions[0] # Grab the specific user
-                guild = message.guild
-                
+                winner_member = message.mentions[0]
+            
+            # Method B: Search text/embeds for a User ID string like <@123456789>
+            if not winner_member:
+                match = re.search(r"<@!?(\d+)>", text_to_check)
+                if match:
+                    user_id = int(match.group(1))
+                    winner_member = guild.get_member(user_id) or await guild.fetch_member(user_id)
+
+            # If we found the user, put them on cooldown
+            if winner_member:
                 role = discord.utils.get(guild.roles, name=COOLDOWN_ROLE_NAME)
                 if not role:
                     print(f"❌ Error: '{COOLDOWN_ROLE_NAME}' role not found.")
@@ -73,21 +99,21 @@ async def on_message(message):
                 end_time = datetime.utcnow() + timedelta(minutes=COOLDOWN_MINUTES)
                 end_time_str = end_time.strftime('%Y-%m-%d %H:%M:%S')
 
-                # Save to database (Includes channel tracking)
+                # Save tracker entry to the DB
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
-                c.execute("DELETE FROM cooldowns WHERE user_id=? AND guild_id=?", (winner.id, guild.id))
-                c.execute("INSERT INTO cooldowns VALUES (?, ?, ?, ?)", (winner.id, guild.id, message.channel.id, end_time_str))
+                c.execute("DELETE FROM cooldowns WHERE user_id=? AND guild_id=?", (winner_member.id, guild.id))
+                c.execute("INSERT INTO cooldowns VALUES (?, ?, ?, ?)", (winner_member.id, guild.id, message.channel.id, end_time_str))
                 conn.commit()
                 conn.close()
 
                 try:
                     # Give role right away
-                    await winner.add_roles(role)
+                    await winner_member.add_roles(role)
                     # Send custom text message in same channel right away
-                    await message.channel.send(f"{winner.mention} congrats for getting the Pokémon!! you are held down to cooldown now. your next allowance is in {COOLDOWN_MINUTES} minutes.")
+                    await message.channel.send(f"{winner_member.mention} congrats for getting the Pokémon!! you are held down to cooldown now. your next allowance is in {COOLDOWN_MINUTES} minutes.")
                 except discord.Forbidden:
-                    await message.channel.send("❌ **PokéFair Error**: Cannot manage roles. Drag my role *above* the cooldown role in Server Settings!")
+                    await message.channel.send("❌ **PokéFair Error**: Cannot manage roles. Make sure the PokéFair role is dragged *above* the cooldown role in your Server Settings!")
 
     await bot.process_commands(message)
 
