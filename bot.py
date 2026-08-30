@@ -35,7 +35,7 @@ def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS cooldowns 
-                 (user_id INTEGER, guild_id INTEGER, end_time TEXT)''')
+                 (user_id INTEGER, guild_id INTEGER, channel_id INTEGER, end_time TEXT)''')
     conn.commit()
     conn.close()
 
@@ -62,7 +62,7 @@ async def on_message(message):
     if message.author.id == POKETWO_BOT_ID and message.channel.name in CHANNELS_TO_WATCH:
         if "Congratulations" in message.content and "caught a" in message.content:
             if message.mentions:
-                winner = message.mentions[0]
+                winner = message.mentions[0] # Grab the specific user
                 guild = message.guild
                 
                 role = discord.utils.get(guild.roles, name=COOLDOWN_ROLE_NAME)
@@ -73,16 +73,19 @@ async def on_message(message):
                 end_time = datetime.utcnow() + timedelta(minutes=COOLDOWN_MINUTES)
                 end_time_str = end_time.strftime('%Y-%m-%d %H:%M:%S')
 
+                # Save to database (Includes channel tracking)
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
                 c.execute("DELETE FROM cooldowns WHERE user_id=? AND guild_id=?", (winner.id, guild.id))
-                c.execute("INSERT INTO cooldowns VALUES (?, ?, ?)", (winner.id, guild.id, end_time_str))
+                c.execute("INSERT INTO cooldowns VALUES (?, ?, ?, ?)", (winner.id, guild.id, message.channel.id, end_time_str))
                 conn.commit()
                 conn.close()
 
                 try:
+                    # Give role right away
                     await winner.add_roles(role)
-                    await message.channel.send(f"🐾 **PokéFair**: {winner.mention} is now on a {COOLDOWN_MINUTES}-minute cooldown.")
+                    # Send custom text message in same channel right away
+                    await message.channel.send(f"{winner.mention} congrats for getting the Pokémon!! you are held down to cooldown now. your next allowance is in {COOLDOWN_MINUTES} minutes.")
                 except discord.Forbidden:
                     await message.channel.send("❌ **PokéFair Error**: Cannot manage roles. Drag my role *above* the cooldown role in Server Settings!")
 
@@ -95,23 +98,33 @@ async def check_cooldowns():
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT user_id, guild_id FROM cooldowns WHERE end_time <= ?", (now_str,))
+    c.execute("SELECT user_id, guild_id, channel_id FROM cooldowns WHERE end_time <= ?", (now_str,))
     expired = c.fetchall()
 
-    for user_id, guild_id in expired:
+    for user_id, guild_id, channel_id in expired:
         guild = bot.get_guild(guild_id)
         if guild:
             try:
                 member = guild.get_member(user_id) or await guild.fetch_member(user_id)
                 role = discord.utils.get(guild.roles, name=COOLDOWN_ROLE_NAME)
+                channel = guild.get_channel(channel_id)
                 
                 if member and role and role in member.roles:
+                    # Remove the role
                     await member.remove_roles(role)
-                    await member.send(
-                        "🟢 **Pokémon cooldown ended!**\n"
-                        "You're free to return to the Pokémon channels and hunt again. 🐾\n"
-                        "Good luck on your next catch!"
-                    )
+                    
+                    cooldown_end_text = f"{member.mention} your cooldown ended. you can freely catch pokemon again now! good luck!"
+                    
+                    # 1. Mention in DM
+                    try:
+                        await member.send(cooldown_end_text)
+                    except Exception:
+                        print(f"Could not send DM to {member.name}")
+                        
+                    # 2. Mention in the #chat channel where they caught it
+                    if channel:
+                        await channel.send(cooldown_end_text)
+                        
             except Exception as e:
                 print(f"Could not clear cooldown for user {user_id}: {e}")
         
