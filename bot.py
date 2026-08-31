@@ -42,10 +42,9 @@ def init_db():
 
 init_db()
 
+# Discord intents
 intents = discord.Intents.default()
-intents.messages = True
 intents.message_content = True
-intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -78,11 +77,11 @@ async def on_message(message):
         # Check if this is a catch confirmation message
         if "Congratulations" in text_to_check and "caught a" in text_to_check:
             
-            # Method A: Try grabbing standard message mentions first (Grabbing the single first user)
+            # Method A: Try grabbing standard message mentions first
             if message.mentions:
                 winner_member = message.mentions[0]
             
-            # Method B: Search text/embeds for a User ID string like <@123456789>
+            # Method B: Search text/embeds for a User ID string
             if not winner_member:
                 match = re.search(r"<@!?(\d+)>", text_to_check)
                 if match:
@@ -102,18 +101,34 @@ async def on_message(message):
                 # Save tracker entry to the DB
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
-                c.execute("DELETE FROM cooldowns WHERE user_id=? AND guild_id=?", (winner_member.id, guild.id))
-                c.execute("INSERT INTO cooldowns VALUES (?, ?, ?, ?)", (winner_member.id, guild.id, message.channel.id, end_time_str))
+                c.execute(
+                    "DELETE FROM cooldowns WHERE user_id=? AND guild_id=?",
+                    (winner_member.id, guild.id)
+                )
+                c.execute(
+                    "INSERT INTO cooldowns VALUES (?, ?, ?, ?)",
+                    (winner_member.id, guild.id, message.channel.id, end_time_str)
+                )
                 conn.commit()
                 conn.close()
 
                 try:
                     # Give role right away
                     await winner_member.add_roles(role)
-                    # Send custom text message in same channel right away
-                    await message.channel.send(f"{winner_member.mention} congrats for getting the Pokémon!! you are held down to cooldown now. your next allowance is in {COOLDOWN_MINUTES} minutes.")
+
+                    # Send custom text message in same channel
+                    await message.channel.send(
+                        f"{winner_member.mention} congrats for getting the Pokémon!! "
+                        f"you are held down to cooldown now. your next allowance is in "
+                        f"{COOLDOWN_MINUTES} minutes."
+                    )
+
                 except discord.Forbidden:
-                    await message.channel.send("❌ **PokéFair Error**: Cannot manage roles. Make sure the PokéFair role is dragged *above* the cooldown role in your Server Settings!")
+                    await message.channel.send(
+                        "❌ **PokéFair Error**: Cannot manage roles. "
+                        "Make sure the PokéFair role is dragged *above* the cooldown role "
+                        "in your Server Settings!"
+                    )
 
     await bot.process_commands(message)
 
@@ -124,43 +139,16 @@ async def check_cooldowns():
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT user_id, guild_id, channel_id FROM cooldowns WHERE end_time <= ?", (now_str,))
+
+    c.execute(
+        "SELECT user_id, guild_id, channel_id FROM cooldowns WHERE end_time <= ?",
+        (now_str,)
+    )
     expired = c.fetchall()
 
     for user_id, guild_id, channel_id in expired:
         guild = bot.get_guild(guild_id)
+
         if guild:
             try:
-                member = guild.get_member(user_id) or await guild.fetch_member(user_id)
-                role = discord.utils.get(guild.roles, name=COOLDOWN_ROLE_NAME)
-                channel = guild.get_channel(channel_id)
-                
-                if member and role and role in member.roles:
-                    # Remove the role
-                    await member.remove_roles(role)
-                    
-                    cooldown_end_text = f"{member.mention} your cooldown ended. you can freely catch pokemon again now! good luck!"
-                    
-                    # 1. Mention in DM
-                    try:
-                        await member.send(cooldown_end_text)
-                    except Exception:
-                        print(f"Could not send DM to {member.name}")
-                        
-                    # 2. Mention in the #chat channel where they caught it
-                    if channel:
-                        await channel.send(cooldown_end_text)
-                        
-            except Exception as e:
-                print(f"Could not clear cooldown for user {user_id}: {e}")
-        
-        c.execute("DELETE FROM cooldowns WHERE user_id=? AND guild_id=?", (user_id, guild_id))
-        conn.commit()
-
-    conn.close()
-
-if __name__ == "__main__":
-    t = threading.Thread(target=run_web)
-    t.daemon = True
-    t.start()
-    bot.run(TOKEN)
+                member
