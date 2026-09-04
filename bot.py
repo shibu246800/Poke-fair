@@ -459,3 +459,288 @@ async def on_message(message):
         )
 
         # ----------------------------------------------------
+        # Role hierarchy
+        # ----------------------------------------------------
+
+        if role >= bot_member.top_role:
+
+            print(
+                "❌❌❌ ROLE HIERARCHY ERROR!"
+            )
+
+            print(
+                "The PokéFair bot role MUST be "
+                "ABOVE the Pokémon Cooldown role."
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Manage Roles permission
+        # ----------------------------------------------------
+
+        if not bot_member.guild_permissions.manage_roles:
+
+            print(
+                "❌❌❌ POKÉFAIR DOES NOT HAVE "
+                "MANAGE ROLES PERMISSION!"
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Give cooldown role
+        # ----------------------------------------------------
+
+        print(
+            "⏳ Giving Pokémon Cooldown role..."
+        )
+
+        try:
+
+            await winner.add_roles(
+                role,
+                reason="Pokémon catch cooldown"
+            )
+
+            print(
+                f"✅✅✅ ROLE GIVEN SUCCESSFULLY "
+                f"TO {winner}!"
+            )
+
+        except discord.Forbidden:
+
+            print(
+                "❌❌❌ DISCORD FORBIDDEN!"
+            )
+
+            print(
+                "Check Manage Roles permission "
+                "and role hierarchy."
+            )
+
+            return
+
+        except discord.HTTPException as error:
+
+            print(
+                f"❌❌❌ DISCORD HTTP ERROR: {error}"
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Save cooldown
+        # ----------------------------------------------------
+
+        add_cooldown(
+            user_id=winner.id,
+            guild_id=message.guild.id,
+            channel_id=message.channel.id
+        )
+
+        print(
+            f"⏰ COOLDOWN SAVED: "
+            f"{COOLDOWN_MINUTES} MINUTES"
+        )
+
+        # ----------------------------------------------------
+        # Confirmation message
+        # ----------------------------------------------------
+
+        try:
+
+            await message.channel.send(
+                f"{winner.mention} is now under cooldown "
+                f"for {COOLDOWN_MINUTES} mins. "
+                f"Enjoy the rest of the server! 🐾"
+            )
+
+            print(
+                "📢 COOLDOWN CONFIRMATION SENT!"
+            )
+
+        except discord.Forbidden:
+
+            print(
+                "⚠️ PokéFair cannot send messages "
+                "in this channel."
+            )
+
+        except discord.HTTPException as error:
+
+            print(
+                f"⚠️ Could not send confirmation: "
+                f"{error}"
+            )
+
+        return
+
+    # Normal commands
+    await bot.process_commands(message)
+
+
+# ============================================================
+# AUTOMATIC COOLDOWN CLEANUP
+# ============================================================
+
+@tasks.loop(seconds=10)
+async def check_cooldowns():
+
+    expired = get_expired_cooldowns()
+
+    if not expired:
+        return
+
+    print(
+        f"⏰ {len(expired)} cooldown(s) expired."
+    )
+
+    for user_id, guild_id, channel_id in expired:
+
+        guild = bot.get_guild(guild_id)
+
+        if guild is None:
+
+            remove_cooldown(
+                user_id,
+                guild_id
+            )
+
+            continue
+
+        # ----------------------------------------------------
+        # Find member
+        # ----------------------------------------------------
+
+        member = guild.get_member(
+            user_id
+        )
+
+        if member is None:
+
+            try:
+
+                member = await guild.fetch_member(
+                    user_id
+                )
+
+            except (
+                discord.NotFound,
+                discord.HTTPException
+            ):
+
+                remove_cooldown(
+                    user_id,
+                    guild_id
+                )
+
+                continue
+
+        # ----------------------------------------------------
+        # Find role
+        # ----------------------------------------------------
+
+        role = guild.get_role(
+            COOLDOWN_ROLE_ID
+        )
+
+        if role is None:
+
+            remove_cooldown(
+                user_id,
+                guild_id
+            )
+
+            continue
+
+        # ----------------------------------------------------
+        # Remove role
+        # ----------------------------------------------------
+
+        if role in member.roles:
+
+            try:
+
+                await member.remove_roles(
+                    role,
+                    reason="Pokémon cooldown expired"
+                )
+
+                print(
+                    f"✅ COOLDOWN ENDED FOR {member}."
+                )
+
+            except discord.Forbidden:
+
+                print(
+                    f"❌ Cannot remove role from {member}."
+                )
+
+            except discord.HTTPException as error:
+
+                print(
+                    f"❌ Error removing role: {error}"
+                )
+
+        # ----------------------------------------------------
+        # DM user
+        # ----------------------------------------------------
+
+        try:
+
+            await member.send(
+                "🐾 Your Pokémon cooldown has ended! "
+                "You can catch Pokémon again. "
+                "Good luck! 🎉"
+            )
+
+            print(
+                f"📩 Cooldown-end DM sent to {member}."
+            )
+
+        except discord.HTTPException:
+
+            print(
+                f"⚠️ Could not DM {member}."
+            )
+
+        # ----------------------------------------------------
+        # Remove database record
+        # ----------------------------------------------------
+
+        remove_cooldown(
+            user_id,
+            guild_id
+        )
+
+
+# ============================================================
+# TASK ERROR HANDLER
+# ============================================================
+
+@check_cooldowns.error
+async def cooldown_task_error(error):
+
+    print(
+        f"❌ COOLDOWN TASK ERROR: {error}"
+    )
+
+
+# ============================================================
+# START BOT
+# ============================================================
+
+if __name__ == "__main__":
+
+    if not TOKEN:
+
+        raise RuntimeError(
+            "DISCORD_TOKEN environment variable is not set!"
+        )
+
+    print(
+        "🚀 Starting PokéFair..."
+    )
+
+    bot.run(TOKEN)
