@@ -8,196 +8,150 @@ import discord
 from discord.ext import commands, tasks
 from flask import Flask
 
+============================================================
 
-# ============================================================
-# CONFIG
-# ============================================================
+CONFIG
+
+============================================================
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-COOLDOWN_ROLE_NAME = os.getenv(
-    "COOLDOWN_ROLE_NAME",
-    "🐾 Pokémon Cooldown"
-)
+COOLDOWN_MINUTES = 20
 
-COOLDOWN_MINUTES = int(
-    os.getenv("COOLDOWN_MINUTES", "20")
-)
-
-DB_FILE = os.getenv(
-    "DATABASE_PATH",
-    "cooldowns.db"
-)
-
-FLASK_HOST = os.getenv(
-    "FLASK_HOST",
-    "0.0.0.0"
-)
-
-FLASK_PORT = int(
-    os.getenv(
-        "PORT",
-        os.getenv("FLASK_PORT", "8080")
-    )
-)
-
-
-# ============================================================
-# POKÉTWO
-# ============================================================
+Pokétwo
 
 POKETWO_BOT_ID = 716390085896962058
 
+PokéFair
 
-# ============================================================
-# CHANNELS TO WATCH
-# ============================================================
+POKEFAIR_BOT_ID = 1543540329121321040
 
-CHANNELS_TO_WATCH = {
-    "🌸・pokecord",
-    "🌸・poketo-spawns",
-    "🌸・spawn-hunt",
-    "🌸・pokemon-hunt",
-    "🌸・pokémon-wild",
+Pokémon Cooldown role
+
+COOLDOWN_ROLE_ID = 1543537941240872970
+
+Your five Pokémon channels
+
+WATCHED_CHANNEL_IDS = {
+1531368924523008171,
+1543531310285463552,
+1543531671347925022,
+1543531912755159060,
+1543531989775421531,
 }
 
+DB_FILE = os.getenv("DATABASE_PATH", "cooldowns.db")
 
-# ============================================================
-# DISCORD INTENTS
-# ============================================================
+FLASK_HOST = "0.0.0.0"
+FLASK_PORT = int(os.getenv("PORT", "8080"))
+
+============================================================
+
+DISCORD INTENTS
+
+============================================================
 
 intents = discord.Intents.default()
-
 intents.guilds = True
 intents.members = True
 intents.messages = True
 intents.message_content = True
 
-
 bot = commands.Bot(
-    command_prefix="!",
-    intents=intents
+command_prefix="!",
+intents=intents
 )
 
+============================================================
 
-# ============================================================
-# FLASK KEEP-ALIVE
-# ============================================================
+FLASK KEEP-ALIVE
 
-app = Flask(__name__)
+============================================================
 
+app = Flask(name)
 
 @app.route("/")
 def home():
-    return "PokéFair bot is alive!"
-
+return "PokéFair bot is alive!"
 
 def run_web():
-    app.run(
-        host=FLASK_HOST,
-        port=FLASK_PORT,
-        debug=False,
-        use_reloader=False
-    )
+app.run(
+host=FLASK_HOST,
+port=FLASK_PORT,
+debug=False,
+use_reloader=False
+)
 
+============================================================
 
-# ============================================================
-# DATABASE
-# ============================================================
+DATABASE
+
+============================================================
 
 def init_db():
-    with sqlite3.connect(DB_FILE) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cooldowns (
-                user_id INTEGER NOT NULL,
-                guild_id INTEGER NOT NULL,
-                channel_id INTEGER NOT NULL,
-                end_time TEXT NOT NULL
-            )
-            """
-        )
+with sqlite3.connect(DB_FILE) as conn:
+conn.execute(
+"""
+CREATE TABLE IF NOT EXISTS cooldowns (
+user_id INTEGER NOT NULL,
+guild_id INTEGER NOT NULL,
+channel_id INTEGER NOT NULL,
+end_time TEXT NOT NULL
+)
+"""
+)
 
+def add_cooldown(user_id, guild_id, channel_id):
+end_time = (
+datetime.now(timezone.utc)
++ timedelta(minutes=COOLDOWN_MINUTES)
+)
 
-def add_cooldown(
-    user_id,
-    guild_id,
-    channel_id,
-    minutes
-):
-    end_time = (
-        datetime.now(timezone.utc)
-        + timedelta(minutes=minutes)
+with sqlite3.connect(DB_FILE) as conn:
+
+    conn.execute(
+        """
+        DELETE FROM cooldowns
+        WHERE user_id = ? AND guild_id = ?
+        """,
+        (user_id, guild_id)
     )
 
-    with sqlite3.connect(DB_FILE) as conn:
-
-        conn.execute(
-            """
-            DELETE FROM cooldowns
-            WHERE user_id = ? AND guild_id = ?
-            """,
-            (user_id, guild_id)
+    conn.execute(
+        """
+        INSERT INTO cooldowns
+        (user_id, guild_id, channel_id, end_time)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            guild_id,
+            channel_id,
+            end_time.isoformat()
         )
-
-        conn.execute(
-            """
-            INSERT INTO cooldowns
-            (user_id, guild_id, channel_id, end_time)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                guild_id,
-                channel_id,
-                end_time.isoformat()
-            )
-        )
-
+    )
 
 def get_expired_cooldowns():
+now = datetime.now(timezone.utc)
+expired = []
 
-    now = datetime.now(timezone.utc)
-    expired = []
+with sqlite3.connect(DB_FILE) as conn:
 
-    with sqlite3.connect(DB_FILE) as conn:
+    rows = conn.execute(
+        """
+        SELECT user_id, guild_id, channel_id, end_time
+        FROM cooldowns
+        """
+    ).fetchall()
 
-        rows = conn.execute(
-            """
-            SELECT
-                user_id,
-                guild_id,
-                channel_id,
-                end_time
-            FROM cooldowns
-            """
-        ).fetchall()
+for user_id, guild_id, channel_id, end_time_string in rows:
 
-    for (
-        user_id,
-        guild_id,
-        channel_id,
-        end_time_str
-    ) in rows:
+    try:
+        end_time = datetime.fromisoformat(
+            end_time_string
+        )
 
-        try:
-
-            end_time = datetime.fromisoformat(
-                end_time_str
-            )
-
-            if end_time <= now:
-
-                expired.append(
-                    (
-                        user_id,
-                        guild_id,
-                        channel_id
-                    )
-                )
-
-        except (ValueError, TypeError):
-
+        if end_time <= now:
             expired.append(
                 (
                     user_id,
@@ -206,255 +160,311 @@ def get_expired_cooldowns():
                 )
             )
 
-    return expired
+    except (ValueError, TypeError):
 
-
-def remove_cooldown(
-    user_id,
-    guild_id
-):
-
-    with sqlite3.connect(DB_FILE) as conn:
-
-        conn.execute(
-            """
-            DELETE FROM cooldowns
-            WHERE user_id = ? AND guild_id = ?
-            """,
-            (user_id, guild_id)
+        expired.append(
+            (
+                user_id,
+                guild_id,
+                channel_id
+            )
         )
 
+return expired
 
-# ============================================================
-# READ MESSAGE + EMBEDS
-# ============================================================
+def remove_cooldown(user_id, guild_id):
+
+with sqlite3.connect(DB_FILE) as conn:
+
+    conn.execute(
+        """
+        DELETE FROM cooldowns
+        WHERE user_id = ? AND guild_id = ?
+        """,
+        (user_id, guild_id)
+    )
+
+============================================================
+
+READ MESSAGE + EMBEDS
+
+============================================================
 
 def get_message_text(message):
 
-    parts = []
+parts = []
 
-    if message.content:
-        parts.append(message.content)
+if message.content:
+    parts.append(message.content)
 
-    for embed in message.embeds:
+for embed in message.embeds:
 
-        if embed.title:
-            parts.append(embed.title)
+    if embed.title:
+        parts.append(embed.title)
 
-        if embed.description:
-            parts.append(embed.description)
+    if embed.description:
+        parts.append(embed.description)
 
-        if embed.author and embed.author.name:
-            parts.append(embed.author.name)
+    if embed.author and embed.author.name:
+        parts.append(embed.author.name)
 
-        for field in embed.fields:
+    for field in embed.fields:
 
-            if field.name:
-                parts.append(field.name)
+        if field.name:
+            parts.append(field.name)
 
-            if field.value:
-                parts.append(field.value)
+        if field.value:
+            parts.append(field.value)
 
-        if embed.footer and embed.footer.text:
-            parts.append(embed.footer.text)
+    if embed.footer and embed.footer.text:
+        parts.append(embed.footer.text)
 
-    return "\n".join(parts)
+return "\n".join(parts)
 
+============================================================
 
-# ============================================================
-# FIND WINNER
-# ============================================================
+FIND WINNER
+
+============================================================
 
 async def find_winner(message):
 
-    full_text = get_message_text(message)
+full_text = get_message_text(message)
 
-    # Look for <@USER_ID> or <@!USER_ID>
-    match = re.search(
-        r"<@!?(\d+)>",
-        full_text
+print("🔎 Pokétwo message:")
+print(full_text)
+
+# Find:
+# <@123456789>
+# or:
+# <@!123456789>
+
+match = re.search(
+    r"<@!?(\d+)>",
+    full_text
+)
+
+if match:
+
+    user_id = int(match.group(1))
+
+    print(
+        f"👤 Winner ID found: {user_id}"
     )
 
-    if match:
+    member = message.guild.get_member(
+        user_id
+    )
 
-        user_id = int(match.group(1))
+    if member:
+        return member
 
-        member = message.guild.get_member(
+    try:
+
+        return await message.guild.fetch_member(
             user_id
         )
 
-        if member:
-            return member
+    except discord.NotFound:
 
-        try:
+        print(
+            f"❌ User {user_id} not found."
+        )
 
-            return await message.guild.fetch_member(
-                user_id
-            )
+    except discord.HTTPException as error:
 
-        except discord.NotFound:
+        print(
+            f"❌ Could not fetch user: {error}"
+        )
 
-            print(
-                f"❌ User {user_id} not found."
-            )
+# Fallback to actual mentions
 
-        except discord.HTTPException as e:
+for member in message.mentions:
 
-            print(
-                f"❌ Could not fetch "
-                f"user {user_id}: {e}"
-            )
+    if not member.bot:
 
-    # Fallback to actual mentions
-    for member in message.mentions:
+        print(
+            f"👤 Winner found through mentions: "
+            f"{member}"
+        )
 
-        if not member.bot:
-            return member
+        return member
 
-    return None
+return None
 
+============================================================
 
-# ============================================================
-# READY
-# ============================================================
+BOT READY
+
+============================================================
 
 @bot.event
 async def on_ready():
 
+print("=" * 60)
+print("🐾 POKÉFAIR IS ONLINE")
+print(f"🤖 Bot: {bot.user}")
+print(f"🆔 Bot ID: {bot.user.id}")
+print("=" * 60)
+
+init_db()
+
+if not check_cooldowns.is_running():
+
+    check_cooldowns.start()
+
+if not hasattr(bot, "web_started"):
+
+    bot.web_started = True
+
+    threading.Thread(
+        target=run_web,
+        daemon=True
+    ).start()
+
     print(
-        f"✅ PokéFair is ONLINE as "
-        f"{bot.user} "
-        f"(ID: {bot.user.id})"
+        "🌐 Flask keep-alive started."
     )
 
-    init_db()
+print(
+    "✅ PokéFair is ready."
+)
 
-    if not check_cooldowns.is_running():
-        check_cooldowns.start()
+============================================================
 
-    if not getattr(
-        bot,
-        "web_started",
-        False
-    ):
+MESSAGE DETECTION
 
-        threading.Thread(
-            target=run_web,
-            daemon=True
-        ).start()
-
-        bot.web_started = True
-
-        print(
-            "🌐 Keep-alive web server started."
-        )
-
-
-# ============================================================
-# MESSAGE EVENT
-# ============================================================
+============================================================
 
 @bot.event
 async def on_message(message):
 
-    # Ignore our own messages
-    if (
-        bot.user
-        and message.author.id == bot.user.id
-    ):
-        return
+# --------------------------------------------------------
+# Ignore PokéFair itself
+# --------------------------------------------------------
 
-    # Ignore DMs
-    if message.guild is None:
-        return
+if message.author.id == POKEFAIR_BOT_ID:
+    return
 
-    # Only watch the Pokémon channels
-    if (
-        message.channel.name
-        not in CHANNELS_TO_WATCH
-    ):
-        return
+# --------------------------------------------------------
+# Only inspect Pokétwo messages in the five channels
+# --------------------------------------------------------
 
-    # ONLY Pokétwo messages matter here
-    if message.author.id != POKETWO_BOT_ID:
-        return
+if (
+    message.author.id == POKETWO_BOT_ID
+    and message.channel.id in WATCHED_CHANNEL_IDS
+):
+
+    print("=" * 60)
+    print("🎯 POKÉTWO MESSAGE RECEIVED!")
+    print(
+        f"📍 Channel ID: {message.channel.id}"
+    )
+    print(
+        f"🆔 Message ID: {message.id}"
+    )
 
     full_text = get_message_text(message)
+
+    print("📨 MESSAGE:")
+    print(full_text)
+    print("=" * 60)
+
+    # ----------------------------------------------------
+    # Detect the exact catch wording
+    # ----------------------------------------------------
+
     text_lower = full_text.lower()
 
-    print(
-        f"📩 Pokétwo message in "
-        f"#{message.channel.name}: "
-        f"{full_text[:300]}"
-    )
-
-    # Detect catch message
     if (
         "congratulations" not in text_lower
-        or "caught a" not in text_lower
+        or "you caught" not in text_lower
     ):
+
+        print(
+            "ℹ️ Pokétwo message received, "
+            "but this is not a catch message."
+        )
+
         return
 
     print(
-        "🎯🎯🎯 POKÉTWO CATCH DETECTED! 🎯🎯🎯"
+        "🎉🎉🎉 POKÉMON CATCH CONFIRMED! 🎉🎉🎉"
     )
 
-    # Find winner
-    winner_member = await find_winner(
-        message
-    )
-
-    if winner_member is None:
+    if message.guild is None:
 
         print(
-            "❌ CATCH FOUND BUT WINNER "
-            "NOT FOUND."
+            "❌ Message has no guild."
+        )
+
+        return
+
+    # ----------------------------------------------------
+    # Find winner
+    # ----------------------------------------------------
+
+    winner = await find_winner(message)
+
+    if winner is None:
+
+        print(
+            "❌❌ WINNER NOT FOUND."
         )
 
         return
 
     print(
         f"✅ WINNER FOUND: "
-        f"{winner_member} "
-        f"({winner_member.id})"
+        f"{winner} ({winner.id})"
     )
 
+    # ----------------------------------------------------
     # Find cooldown role
-    role = discord.utils.get(
-        message.guild.roles,
-        name=COOLDOWN_ROLE_NAME
+    # ----------------------------------------------------
+
+    role = message.guild.get_role(
+        COOLDOWN_ROLE_ID
     )
 
     if role is None:
 
         print(
-            f"❌ ROLE NOT FOUND: "
-            f"{COOLDOWN_ROLE_NAME}"
+            "❌❌ COOLDOWN ROLE NOT FOUND!"
+        )
+
+        print(
+            f"Expected role ID: "
+            f"{COOLDOWN_ROLE_ID}"
         )
 
         return
 
     print(
-        f"🎭 ROLE FOUND: "
-        f"{role.name} "
-        f"| Position: {role.position}"
+        f"🎭 ROLE FOUND: {role.name}"
     )
 
-    # Find bot's guild member
+    # ----------------------------------------------------
+    # Get PokéFair's server member
+    # ----------------------------------------------------
+
     bot_member = message.guild.me
 
     if bot_member is None:
 
         print(
-            "❌ Could not find bot member."
+            "❌ Could not find PokéFair's server member."
         )
 
         return
 
     print(
-        f"🤖 BOT TOP ROLE: "
-        f"{bot_member.top_role.name} "
-        f"| Position: "
+        f"🤖 POKÉFAIR TOP ROLE: "
+        f"{bot_member.top_role.name}"
+    )
+
+    print(
+        f"🤖 POKÉFAIR ROLE POSITION: "
         f"{bot_member.top_role.position}"
     )
 
@@ -463,7 +473,10 @@ async def on_message(message):
         f"{role.position}"
     )
 
-    # Hierarchy check
+    # ----------------------------------------------------
+    # Check hierarchy
+    # ----------------------------------------------------
+
     if role >= bot_member.top_role:
 
         print(
@@ -471,274 +484,285 @@ async def on_message(message):
         )
 
         print(
-            "Move the PokéFair bot role "
-            "ABOVE the Pokémon Cooldown role."
+            "Move the PokéFair bot role ABOVE "
+            "the Pokémon Cooldown role."
         )
 
         return
 
-    # Prevent duplicate cooldown
-    if role in winner_member.roles:
+    # ----------------------------------------------------
+    # Check Manage Roles permission
+    # ----------------------------------------------------
+
+    if not bot_member.guild_permissions.manage_roles:
 
         print(
-            f"⚠️ {winner_member} "
-            f"is already on cooldown."
+            "❌❌❌ POKÉFAIR DOES NOT HAVE "
+            "MANAGE ROLES PERMISSION!"
         )
 
         return
 
-    # Give role
+    # ----------------------------------------------------
+    # Give cooldown role
+    # ----------------------------------------------------
+
     print(
-        "⏳ Attempting to give "
-        "cooldown role..."
+        "⏳ Giving Pokémon Cooldown role..."
     )
 
     try:
 
-        await winner_member.add_roles(
+        await winner.add_roles(
             role,
             reason="Pokémon catch cooldown"
         )
 
         print(
-            f"✅ ROLE GIVEN SUCCESSFULLY "
-            f"TO {winner_member}!"
+            f"✅✅✅ ROLE GIVEN SUCCESSFULLY "
+            f"TO {winner}!"
         )
 
     except discord.Forbidden:
 
         print(
-            "❌ FORBIDDEN: PokéFair needs "
-            "Manage Roles and its role must "
-            "be above the cooldown role."
+            "❌❌❌ DISCORD FORBIDDEN!"
         )
-
-        return
-
-    except discord.HTTPException as e:
 
         print(
-            f"❌ HTTP ERROR GIVING ROLE: {e}"
+            "Check Manage Roles permission "
+            "and role hierarchy."
         )
 
         return
 
+    except discord.HTTPException as error:
+
+        print(
+            f"❌❌❌ DISCORD HTTP ERROR: {error}"
+        )
+
+        return
+
+    # ----------------------------------------------------
     # Save cooldown
+    # ----------------------------------------------------
+
     add_cooldown(
-        winner_member.id,
-        message.guild.id,
-        message.channel.id,
-        COOLDOWN_MINUTES
+        user_id=winner.id,
+        guild_id=message.guild.id,
+        channel_id=message.channel.id
     )
 
     print(
-        f"⏰ COOLDOWN SAVED FOR "
-        f"{COOLDOWN_MINUTES} MINUTES."
+        f"⏰ COOLDOWN SAVED: "
+        f"{COOLDOWN_MINUTES} MINUTES"
     )
 
-    # Confirmation
+    # ----------------------------------------------------
+    # CONFIRMATION MESSAGE
+    # ----------------------------------------------------
+
     try:
 
         await message.channel.send(
-            f"{winner_member.mention} "
-            f"congrats for getting the Pokémon!! 🎉\n"
-            f"You are now on cooldown for "
-            f"{COOLDOWN_MINUTES} minutes."
+            f"{winner.mention} is now under cooldown "
+            f"for {COOLDOWN_MINUTES} mins. "
+            f"Enjoy the rest of the server! 🐾"
         )
 
         print(
-            "✅ Confirmation message sent."
+            "📢 COOLDOWN CONFIRMATION SENT!"
         )
 
-    except discord.HTTPException as e:
+    except discord.Forbidden:
 
         print(
-            f"⚠️ Could not send "
-            f"confirmation: {e}"
+            "⚠️ PokéFair cannot send messages "
+            "in this channel."
         )
 
+    except discord.HTTPException as error:
 
-# ============================================================
-# COOLDOWN CLEANUP
-# ============================================================
+        print(
+            f"⚠️ Could not send confirmation: "
+            f"{error}"
+        )
+
+    return
+
+# --------------------------------------------------------
+# Normal commands
+# --------------------------------------------------------
+
+await bot.process_commands(message)
+
+============================================================
+
+AUTOMATIC COOLDOWN CLEANUP
+
+============================================================
 
 @tasks.loop(seconds=10)
 async def check_cooldowns():
 
-    expired = get_expired_cooldowns()
+expired = get_expired_cooldowns()
 
-    for (
-        user_id,
-        guild_id,
-        channel_id
-    ) in expired:
+if not expired:
+    return
+
+print(
+    f"⏰ {len(expired)} cooldown(s) expired."
+)
+
+for user_id, guild_id, channel_id in expired:
+
+    guild = bot.get_guild(guild_id)
+
+    if guild is None:
+
+        remove_cooldown(
+            user_id,
+            guild_id
+        )
+
+        continue
+
+    # ----------------------------------------------------
+    # Find member
+    # ----------------------------------------------------
+
+    member = guild.get_member(
+        user_id
+    )
+
+    if member is None:
 
         try:
 
-            guild = bot.get_guild(
-                guild_id
-            )
-
-            if guild is None:
-
-                remove_cooldown(
-                    user_id,
-                    guild_id
-                )
-
-                continue
-
-            # Find member
-            member = guild.get_member(
+            member = await guild.fetch_member(
                 user_id
             )
 
-            if member is None:
+        except (
+            discord.NotFound,
+            discord.HTTPException
+        ):
 
-                try:
-
-                    member = await guild.fetch_member(
-                        user_id
-                    )
-
-                except discord.NotFound:
-
-                    print(
-                        f"⚠️ User {user_id} "
-                        f"is no longer in server."
-                    )
-
-                    remove_cooldown(
-                        user_id,
-                        guild_id
-                    )
-
-                    continue
-
-                except discord.HTTPException as e:
-
-                    print(
-                        f"⚠️ Could not fetch "
-                        f"user {user_id}: {e}"
-                    )
-
-                    continue
-
-            # Find role
-            role = discord.utils.get(
-                guild.roles,
-                name=COOLDOWN_ROLE_NAME
-            )
-
-            if role is None:
-
-                remove_cooldown(
-                    user_id,
-                    guild_id
-                )
-
-                continue
-
-            # Remove role
-            if role in member.roles:
-
-                try:
-
-                    await member.remove_roles(
-                        role,
-                        reason="Pokémon cooldown expired"
-                    )
-
-                    print(
-                        f"✅ Cooldown ended "
-                        f"for {member}."
-                    )
-
-                except discord.Forbidden:
-
-                    print(
-                        f"❌ Missing permission "
-                        f"to remove role from "
-                        f"{member}."
-                    )
-
-                    continue
-
-                except discord.HTTPException as e:
-
-                    print(
-                        f"❌ HTTP error removing "
-                        f"role: {e}"
-                    )
-
-                    continue
-
-            # DM user
-            try:
-
-                await member.send(
-                    "Your Pokémon cooldown "
-                    "has ended! 🎉\n"
-                    "You can catch Pokémon "
-                    "again. Good luck!"
-                )
-
-            except discord.HTTPException:
-
-                print(
-                    f"⚠️ Could not DM {member}."
-                )
-
-            # Remove database entry
             remove_cooldown(
                 user_id,
                 guild_id
             )
 
-        except Exception as e:
+            continue
 
-            print(
-                f"❌ Error processing "
-                f"cooldown for {user_id}: "
-                f"{type(e).__name__}: {e}"
-            )
+    # ----------------------------------------------------
+    # Find role
+    # ----------------------------------------------------
 
+    role = guild.get_role(
+        COOLDOWN_ROLE_ID
+    )
 
-# ============================================================
-# TASK STARTUP
-# ============================================================
+    if role is None:
 
-@check_cooldowns.before_loop
-async def before_check_cooldowns():
-
-    await bot.wait_until_ready()
-
-
-# ============================================================
-# START BOT
-# ============================================================
-
-if __name__ == "__main__":
-
-    if not TOKEN:
-
-        raise RuntimeError(
-            "DISCORD_TOKEN environment "
-            "variable not set!"
+        remove_cooldown(
+            user_id,
+            guild_id
         )
 
-    print(
-        "🚀 Starting PokéFair..."
+        continue
+
+    # ----------------------------------------------------
+    # Remove role
+    # ----------------------------------------------------
+
+    if role in member.roles:
+
+        try:
+
+            await member.remove_roles(
+                role,
+                reason="Pokémon cooldown expired"
+            )
+
+            print(
+                f"✅ COOLDOWN ENDED FOR {member}."
+            )
+
+        except discord.Forbidden:
+
+            print(
+                f"❌ Cannot remove role from "
+                f"{member}."
+            )
+
+        except discord.HTTPException as error:
+
+            print(
+                f"❌ Error removing role: {error}"
+            )
+
+    # ----------------------------------------------------
+    # DM user
+    # ----------------------------------------------------
+
+    try:
+
+        await member.send(
+            "🐾 Your Pokémon cooldown has ended! "
+            "You can catch Pokémon again. "
+            "Good luck! 🎉"
+        )
+
+        print(
+            f"📩 Cooldown-end DM sent to {member}."
+        )
+
+    except discord.HTTPException:
+
+        print(
+            f"⚠️ Could not DM {member}."
+        )
+
+    # ----------------------------------------------------
+    # Delete database record
+    # ----------------------------------------------------
+
+    remove_cooldown(
+        user_id,
+        guild_id
     )
 
-    print(
-        f"🐾 Cooldown role: "
-        f"{COOLDOWN_ROLE_NAME}"
+============================================================
+
+TASK ERROR HANDLER
+
+============================================================
+
+@check_cooldowns.error
+async def cooldown_task_error(error):
+
+print(
+    f"❌ COOLDOWN TASK ERROR: {error}"
+)
+
+============================================================
+
+START BOT
+
+============================================================
+
+if name == "main":
+
+if not TOKEN:
+
+    raise RuntimeError(
+        "DISCORD_TOKEN environment variable is not set!"
     )
 
-    print(
-        f"⏰ Cooldown: "
-        f"{COOLDOWN_MINUTES} minutes"
-    )
+print(
+    "🚀 Starting PokéFair..."
+)
 
-    bot.run(TOKEN)
+bot.run(TOKEN)
