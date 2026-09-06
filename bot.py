@@ -3,6 +3,7 @@ import re
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import discord
 from discord.ext import commands, tasks
@@ -15,7 +16,14 @@ from flask import Flask
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
+# Normal cooldown
 COOLDOWN_MINUTES = 20
+
+# Night-time cooldown
+NIGHT_COOLDOWN_MINUTES = 10
+
+# India Standard Time
+IST = ZoneInfo("Asia/Kolkata")
 
 # Poketwo bot ID
 POKETWO_BOT_ID = 716390085896962058
@@ -39,6 +47,29 @@ DB_FILE = os.getenv("DATABASE_PATH", "cooldowns.db")
 
 FLASK_HOST = "0.0.0.0"
 FLASK_PORT = int(os.getenv("PORT", "8080"))
+
+
+# ============================================================
+# COOLDOWN TIME CALCULATOR
+# ============================================================
+
+def get_cooldown_minutes():
+    """
+    Returns:
+    10 minutes between 10:00 PM and 2:00 AM IST
+    20 minutes at all other times.
+    """
+
+    now_ist = datetime.now(IST)
+
+    hour = now_ist.hour
+
+    # 10:00 PM -> 11:59 PM
+    # 12:00 AM -> 1:59 AM
+    if hour >= 22 or hour < 2:
+        return NIGHT_COOLDOWN_MINUTES
+
+    return COOLDOWN_MINUTES
 
 
 # ============================================================
@@ -96,10 +127,10 @@ def init_db():
         )
 
 
-def add_cooldown(user_id, guild_id, channel_id):
+def add_cooldown(user_id, guild_id, channel_id, cooldown_minutes):
     end_time = (
         datetime.now(timezone.utc)
-        + timedelta(minutes=COOLDOWN_MINUTES)
+        + timedelta(minutes=cooldown_minutes)
     )
 
     with sqlite3.connect(DB_FILE) as conn:
@@ -489,6 +520,24 @@ async def on_message(message):
             return
 
         # ----------------------------------------------------
+        # Decide cooldown duration
+        # ----------------------------------------------------
+
+        cooldown_minutes = get_cooldown_minutes()
+
+        now_ist = datetime.now(IST)
+
+        print(
+            f"🇮🇳 Current IST time: "
+            f"{now_ist.strftime('%I:%M %p')}"
+        )
+
+        print(
+            f"⏱️ Cooldown duration: "
+            f"{cooldown_minutes} minutes"
+        )
+
+        # ----------------------------------------------------
         # Give cooldown role
         # ----------------------------------------------------
 
@@ -536,12 +585,13 @@ async def on_message(message):
         add_cooldown(
             user_id=winner.id,
             guild_id=message.guild.id,
-            channel_id=message.channel.id
+            channel_id=message.channel.id,
+            cooldown_minutes=cooldown_minutes
         )
 
         print(
             f"⏰ COOLDOWN SAVED: "
-            f"{COOLDOWN_MINUTES} MINUTES"
+            f"{cooldown_minutes} MINUTES"
         )
 
         # ----------------------------------------------------
@@ -552,7 +602,7 @@ async def on_message(message):
 
             await message.channel.send(
                 f"{winner.mention} is now under cooldown "
-                f"for {COOLDOWN_MINUTES} mins. "
+                f"for {cooldown_minutes} mins. "
                 f"Enjoy the rest of the server! 🐾"
             )
 
@@ -744,3 +794,9 @@ if __name__ == "__main__":
     )
 
     bot.run(TOKEN)
+
+That's it. 😭 Nothing else about your PokéFair behavior has been changed.
+
+One important detail: someone catching at 1:59 AM gets 10 minutes, even though their cooldown ends around 2:09 AM. That's exactly what we want because the duration is determined when they catch. 🐾
+
+And yes—10 PM to 2 AM is interpreted as IST, not Render's server timezone.
