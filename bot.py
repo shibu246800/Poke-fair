@@ -2,16 +2,12 @@ import os
 import re
 import sqlite3
 import threading
-from datetime 
-import datetime, timedelta, timezone
-from zoneinfo 
-import ZoneInfo
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import discord
-from discord.ext 
-import commands, tasks
-from flask
-import Flask
+from discord.ext import commands, tasks
+from flask import Flask
 
 
 # ============================================================
@@ -798,9 +794,3 @@ if __name__ == "__main__":
     )
 
     bot.run(TOKEN)
-
-That's it. 😭 Nothing else about your PokéFair behavior has been changed.
-
-One important detail: someone catching at 1:59 AM gets 10 minutes, even though their cooldown ends around 2:09 AM. That's exactly what we want because the duration is determined when they catch. 🐾
-
-And yes—10 PM to 2 AM is interpreted as IST, not Render's server timezone.
