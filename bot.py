@@ -20,7 +20,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 COOLDOWN_MINUTES = 20
 
 # Night-time cooldown
-NIGHT_COOLDOWN_MINUTES = 10
+NIGHT_COOLDOWN_MINUTES = 5
 
 # India Standard Time
 IST = ZoneInfo("Asia/Kolkata")
